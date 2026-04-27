@@ -64,6 +64,16 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 
 async function handleEvent(event) {
   if (event.type !== 'message') return;
+
+  // 印出來源資訊，幫助取得 Group ID
+  console.log('來源類型:', event.source.type);
+  if (event.source.groupId) {
+    console.log('Group ID:', event.source.groupId);
+  }
+
+  // 如果是群組訊息，不回覆
+  if (event.source.type === 'group' || event.source.type === 'room') return;
+
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
 
   let messageContent;
@@ -82,11 +92,7 @@ async function handleEvent(event) {
     messageContent = [
       {
         type: 'image',
-        source: {
-          type: 'base64',
-          media_type: 'image/jpeg',
-          data: imageData
-        }
+        source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
       },
       {
         type: 'text',
