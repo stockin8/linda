@@ -19,6 +19,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
+const GROUP_ID = process.env.LINE_GROUP_ID;
+
 const SYSTEM_PROMPT = `
 你是「EST168」的客服人員，名字叫做 Linda（琳達）。
 無論客人叫你 Linda、LINDA、linda、琳達，都要認得出來。
@@ -50,7 +52,18 @@ const SYSTEM_PROMPT = `
 
 【遇到無法回答的問題】
 請說：「感謝您的詢問！這個問題我幫您轉給專人處理 😊」
+並且在回覆結尾加上：【需要人工處理】
 `;
+
+async function notifyGroup(customerMessage) {
+  await client.pushMessage({
+    to: GROUP_ID,
+    messages: [{
+      type: 'text',
+      text: `⚠️ 有客人需要人工處理！\n\n客人說：「${customerMessage}」\n\n請盡快回覆！`
+    }]
+  });
+}
 
 app.get('/ping', (req, res) => {
   res.send('OK');
@@ -64,22 +77,15 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 
 async function handleEvent(event) {
   if (event.type !== 'message') return;
-
-  // 印出來源資訊，幫助取得 Group ID
-  console.log('來源類型:', event.source.type);
-  if (event.source.groupId) {
-    console.log('Group ID:', event.source.groupId);
-  }
-
-  // 如果是群組訊息，不回覆
   if (event.source.type === 'group' || event.source.type === 'room') return;
-
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
 
   let messageContent;
+  let userMessage = '';
 
   if (event.message.type === 'text') {
-    messageContent = [{ type: 'text', text: event.message.text }];
+    userMessage = event.message.text;
+    messageContent = [{ type: 'text', text: userMessage }];
   } else if (event.message.type === 'image') {
     const imgResponse = await axios.get(
       `https://api-data.line.me/v2/bot/message/${event.message.id}/content`,
@@ -89,6 +95,7 @@ async function handleEvent(event) {
       }
     );
     const imageData = Buffer.from(imgResponse.data).toString('base64');
+    userMessage = '（客人傳了一張圖片）';
     messageContent = [
       {
         type: 'image',
@@ -110,9 +117,17 @@ async function handleEvent(event) {
 
   const replyText = response.content[0].text;
 
+  // 如果 Linda 無法回答，通知群組
+  if (replyText.includes('【需要人工處理】')) {
+    await notifyGroup(userMessage);
+  }
+
+  // 移除標記再回覆客人
+  const cleanReply = replyText.replace('【需要人工處理】', '').trim();
+
   await client.replyMessage({
     replyToken: event.replyToken,
-    messages: [{ type: 'text', text: replyText }],
+    messages: [{ type: 'text', text: cleanReply }],
   });
 }
 
