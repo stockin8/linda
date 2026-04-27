@@ -52,6 +52,10 @@ const SYSTEM_PROMPT = `
 請說：「感謝您的詢問！這個問題我幫您轉給專人處理 😊」
 `;
 
+app.get('/ping', (req, res) => {
+  res.send('OK');
+});
+
 app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   const events = req.body.events;
   await Promise.all(events.map(handleEvent));
