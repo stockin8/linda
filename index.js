@@ -102,7 +102,7 @@ async function handleEvent(event) {
     return;
   }
   if (event.type !== 'message') return;
-  if (event.source.type === 'group' || event.source.type === 'room') return;
+  // if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
 
   const courseData = await getCourseData();
