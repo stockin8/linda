@@ -97,7 +97,10 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 });
 
 async function handleEvent(event) {
-  if (event.type === 'join') return;
+  if (event.type === 'join') {
+    // 靜靜加入，不做任何事
+    return;
+  }
   if (event.type !== 'message') return;
   if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
