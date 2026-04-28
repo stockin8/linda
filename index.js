@@ -20,11 +20,11 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const GROUP_ID_888 = process.env.GROUP_ID_888;
+const SPREADSHEET_ID_888 = process.env.SPREADSHEET_ID_888;
 const DESTINATION_888 = process.env.DESTINATION_888;
-const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
+const GROUP_ID_888 = process.env.GROUP_ID_888;
 
-async function getCourseData() {
+async function getCourseData(spreadsheetId) {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
     const auth = new google.auth.GoogleAuth({
@@ -34,12 +34,12 @@ async function getCourseData() {
     const sheets = google.sheets({ version: 'v4', auth });
 
     const courseRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId,
       range: '課程!A1:L20',
     });
 
     const faqRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: SPREADSHEET_ID,
+      spreadsheetId: spreadsheetId,
       range: 'FAQ!A1:B50',
     });
 
@@ -117,7 +117,13 @@ async function handleEvent(event, destination) {
   // if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
 
-  const courseData = await getCourseData();
+  let spreadsheetId;
+if (destination === DESTINATION_888) {
+  spreadsheetId = SPREADSHEET_ID_888;
+} else {
+  return;
+}
+const courseData = await getCourseData(spreadsheetId);
 
   const SYSTEM_PROMPT = `
 你是一位小編，負責回覆客人的課程相關問題。
@@ -135,7 +141,7 @@ async function handleEvent(event, destination) {
 ${courseData}
 
 【遇到無法回答的問題】
-請說：「好的，稍等一下，我幫您確認一下狀況 😊」
+請說：「好的，稍等一下，我幫您確認一下狀況」
 並且在回覆結尾加上：【需要人工處理】
 `;
 
