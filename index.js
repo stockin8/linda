@@ -97,8 +97,8 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 });
 
 async function handleEvent(event) {
+  console.log('來源類型:', event.source.type, '| Group ID:', event.source.groupId || '無');
   if (event.type === 'join') {
-    // 靜靜加入，不做任何事
     return;
   }
   if (event.type !== 'message') return;
