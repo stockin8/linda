@@ -20,7 +20,8 @@ const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-const GROUP_ID = process.env.LINE_GROUP_ID;
+const GROUP_ID_888 = process.env.GROUP_ID_888;
+const DESTINATION_888 = process.env.DESTINATION_888;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
 async function getCourseData() {
@@ -76,9 +77,18 @@ async function getCourseData() {
   }
 }
 
-async function notifyGroup(customerMessage, lindaReply) {
+async function notifyGroup(customerMessage, lindaReply, destination) {
+  let groupId;
+  
+  if (destination === DESTINATION_888) {
+    groupId = GROUP_ID_888;
+  } else {
+    console.log('未知的 destination:', destination);
+    return;
+  }
+
   await client.pushMessage({
-    to: GROUP_ID,
+    to: groupId,
     messages: [{
       type: 'text',
       text: `📩 客人說：「${customerMessage}」\n\n💬 Linda 建議回覆：\n${lindaReply}`
@@ -92,12 +102,13 @@ app.get('/ping', (req, res) => {
 
 app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
   console.log('Destination:', req.body.destination);
+  const destination = req.body.destination;
   const events = req.body.events;
-  await Promise.all(events.map(handleEvent));
+  await Promise.all(events.map(event => handleEvent(event, destination)));
   res.json({ status: 'ok' });
 });
 
-async function handleEvent(event) {
+async function handleEvent(event, destination) {
   console.log('來源類型:', event.source.type, '| Group ID:', event.source.groupId || '無');
   if (event.type === 'join') {
     return;
@@ -167,7 +178,7 @@ ${courseData}
   const cleanReply = replyText.replace('【需要人工處理】', '').trim();
 
   // 丟到群組審核，不直接回覆客人
-  await notifyGroup(userMessage, cleanReply);
+  await notifyGroup(userMessage, cleanReply, destination);
 }
 
 const PORT = process.env.PORT || 3000;
