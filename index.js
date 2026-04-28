@@ -23,7 +23,6 @@ const anthropic = new Anthropic({
 const GROUP_ID = process.env.LINE_GROUP_ID;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
-// 讀取 Google 試算表課程資料
 async function getCourseData() {
   try {
     const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
@@ -33,13 +32,11 @@ async function getCourseData() {
     });
     const sheets = google.sheets({ version: 'v4', auth });
 
-    // 讀取課程資料
     const courseRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: '課程!A1:L20',
     });
 
-    // 讀取 FAQ 資料
     const faqRes = await sheets.spreadsheets.values.get({
       spreadsheetId: SPREADSHEET_ID,
       range: 'FAQ!A1:B50',
@@ -48,7 +45,6 @@ async function getCourseData() {
     const courseRows = courseRes.data.values || [];
     const faqRows = faqRes.data.values || [];
 
-    // 整理課程資料
     let courseText = '【目前課程】\n';
     if (courseRows.length > 1) {
       const headers = courseRows[0];
@@ -64,13 +60,12 @@ async function getCourseData() {
       }
     }
 
-    // 整理 FAQ 資料
     let faqText = '【常見問題】\n';
     if (faqRows.length > 1) {
       for (let i = 1; i < faqRows.length; i++) {
         const row = faqRows[i];
         if (!row[0]) continue;
-        faqText += `Q：${row[0]}\nA：${row[1] || '請洽專人'}\n\n`;
+        faqText += `Q：${row[0]}\nA：${row[1] || '請稍等，我幫您確認'}\n\n`;
       }
     }
 
@@ -81,12 +76,12 @@ async function getCourseData() {
   }
 }
 
-async function notifyGroup(customerMessage) {
+async function notifyGroup(customerMessage, lindaReply) {
   await client.pushMessage({
     to: GROUP_ID,
     messages: [{
       type: 'text',
-      text: `⚠️ 有客人需要人工處理！\n\n客人說：「${customerMessage}」\n\n請盡快回覆！`
+      text: `📩 客人說：「${customerMessage}」\n\n💬 Linda 建議回覆：\n${lindaReply}`
     }]
   });
 }
@@ -106,7 +101,6 @@ async function handleEvent(event) {
   if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
 
-  // 每次都讀取最新課程資料
   const courseData = await getCourseData();
 
   const SYSTEM_PROMPT = `
@@ -164,17 +158,10 @@ ${courseData}
   });
 
   const replyText = response.content[0].text;
-
-  if (replyText.includes('【需要人工處理】')) {
-    await notifyGroup(userMessage);
-  }
-
   const cleanReply = replyText.replace('【需要人工處理】', '').trim();
 
-  await client.replyMessage({
-    replyToken: event.replyToken,
-    messages: [{ type: 'text', text: cleanReply }],
-  });
+  // 丟到群組審核，不直接回覆客人
+  await notifyGroup(userMessage, cleanReply);
 }
 
 const PORT = process.env.PORT || 3000;
