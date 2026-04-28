@@ -91,6 +91,7 @@ app.get('/ping', (req, res) => {
 });
 
 app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
+  console.log('Destination:', req.body.destination);
   const events = req.body.events;
   await Promise.all(events.map(handleEvent));
   res.json({ status: 'ok' });
