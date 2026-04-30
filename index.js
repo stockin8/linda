@@ -7,10 +7,19 @@ const { google } = require('googleapis');
 
 const app = express();
 
-const lineConfig = {
-  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
-  channelSecret: process.env.LINE_CHANNEL_SECRET,
+const lineConfig199 = {
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN_199,
+  channelSecret: process.env.LINE_CHANNEL_SECRET_199,
 };
+
+app.post('/webhook199', line.middleware(lineConfig199), async (req, res) => {
+  console.log('@199lqszw 收到事件:', JSON.stringify(req.body));
+  res.json({ status: 'ok' });
+});
+
+app.get('/ping', (req, res) => {
+  res.send('OK');
+});
 
 // @xtm5969p：收客人訊息用
 const client = new line.messagingApi.MessagingApiClient({
