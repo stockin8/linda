@@ -35,22 +35,30 @@ const SPREADSHEET_ID_888 = process.env.SPREADSHEET_ID_888;
 const DESTINATION_888 = process.env.DESTINATION_888;
 const GROUP_ID_888 = process.env.GROUP_ID_888;
 
+const CONVERSATION_SHEET = '對話記錄';
+const MAX_HISTORY = 30;
+const RESET_HOURS = 24;
+
+async function getGoogleSheets() {
+  const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+  const auth = new google.auth.GoogleAuth({
+    credentials,
+    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+  });
+  return google.sheets({ version: 'v4', auth });
+}
+
 async function getCourseData(spreadsheetId) {
   try {
-    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-    const auth = new google.auth.GoogleAuth({
-      credentials,
-      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
-    });
-    const sheets = google.sheets({ version: 'v4', auth });
+    const sheets = await getGoogleSheets();
 
     const courseRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: spreadsheetId,
+      spreadsheetId,
       range: '課程!A1:L20',
     });
 
     const faqRes = await sheets.spreadsheets.values.get({
-      spreadsheetId: spreadsheetId,
+      spreadsheetId,
       range: 'FAQ!A1:B50',
     });
 
@@ -64,9 +72,7 @@ async function getCourseData(spreadsheetId) {
         const row = courseRows[i];
         if (!row[0]) continue;
         headers.forEach((header, index) => {
-          if (row[index]) {
-            courseText += `${header}：${row[index]}\n`;
-          }
+          if (row[index]) courseText += `${header}：${row[index]}\n`;
         });
         courseText += '\n';
       }
@@ -88,13 +94,109 @@ async function getCourseData(spreadsheetId) {
   }
 }
 
+// 取得某個 userId 的對話歷史
+async function getConversationHistory(spreadsheetId, userId) {
+  try {
+    const sheets = await getGoogleSheets();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${CONVERSATION_SHEET}!A:D`,
+    });
+
+    const rows = res.data.values || [];
+    if (rows.length <= 1) return [];
+
+    // 過濾出這個 userId 的對話
+    const userRows = rows.slice(1).filter(row => row[0] === userId);
+    if (userRows.length === 0) return [];
+
+    // 檢查最後一則訊息的時間，超過24小時就清空
+    const lastRow = userRows[userRows.length - 1];
+    const lastTime = new Date(lastRow[3]);
+    const hoursDiff = (Date.now() - lastTime.getTime()) / (1000 * 60 * 60);
+
+    if (hoursDiff >= RESET_HOURS) {
+      // 超過24小時，清空這個 userId 的記錄
+      await clearUserHistory(spreadsheetId, userId);
+      return [];
+    }
+
+    // 只取最近 MAX_HISTORY 則
+    const recent = userRows.slice(-MAX_HISTORY);
+    return recent.map(row => ({
+      role: row[1],
+      content: row[2],
+    }));
+  } catch (error) {
+    console.error('讀取對話記錄失敗:', error);
+    return [];
+  }
+}
+
+// 清空某個 userId 的對話記錄
+async function clearUserHistory(spreadsheetId, userId) {
+  try {
+    const sheets = await getGoogleSheets();
+    const res = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${CONVERSATION_SHEET}!A:D`,
+    });
+
+    const rows = res.data.values || [];
+    if (rows.length <= 1) return;
+
+    // 保留標題列和其他 userId 的資料
+    const header = rows[0];
+    const otherRows = rows.slice(1).filter(row => row[0] !== userId);
+    const newData = [header, ...otherRows];
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: `${CONVERSATION_SHEET}!A1`,
+      valueInputOption: 'RAW',
+      requestBody: { values: newData },
+    });
+
+    // 清空多餘的列
+    if (newData.length < rows.length) {
+      const clearStart = newData.length + 1;
+      const clearEnd = rows.length;
+      await sheets.spreadsheets.values.clear({
+        spreadsheetId,
+        range: `${CONVERSATION_SHEET}!A${clearStart}:D${clearEnd}`,
+      });
+    }
+  } catch (error) {
+    console.error('清空對話記錄失敗:', error);
+  }
+}
+
+// 新增對話記錄
+async function appendConversation(spreadsheetId, userId, role, content) {
+  try {
+    const sheets = await getGoogleSheets();
+    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${CONVERSATION_SHEET}!A:D`,
+      valueInputOption: 'RAW',
+      insertDataOption: 'INSERT_ROWS',
+      requestBody: {
+        values: [[userId, role, content, now]],
+      },
+    });
+  } catch (error) {
+    console.error('寫入對話記錄失敗:', error);
+  }
+}
+
 async function notifyGroup(customerMessage, lindaReply, destination) {
   let groupId;
 
   if (destination === DESTINATION_888) {
     groupId = GROUP_ID_888;
   } else {
-    console.log('未知的 destination:', destination);
     return;
   }
 
@@ -107,9 +209,7 @@ async function notifyGroup(customerMessage, lindaReply, destination) {
       }]
     });
   } catch (err) {
-    console.error('推訊息失敗，完整錯誤：', JSON.stringify(err, null, 2));
-    console.error('錯誤訊息：', err.message);
-    if (err.body) console.error('LINE 回傳內容：', err.body);
+    console.error('推訊息失敗:', err.message);
   }
 }
 
@@ -117,15 +217,11 @@ app.get('/ping', (req, res) => {
   res.send('OK');
 });
 
-// @199lqszw 的 webhook，讓它正式跟群組建立關係
 app.post('/webhook199', line.middleware(lineConfig199), async (req, res) => {
-  console.log('@199lqszw 收到事件:', JSON.stringify(req.body));
   res.json({ status: 'ok' });
 });
 
-// @xtm5969p 的 webhook，收客人訊息
 app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
-  console.log('Destination:', req.body.destination);
   const destination = req.body.destination;
   const events = req.body.events;
   await Promise.all(events.map(event => handleEvent(event, destination)));
@@ -133,10 +229,7 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 });
 
 async function handleEvent(event, destination) {
-  console.log('來源類型:', event.source.type, '| Group ID:', event.source.groupId || '無');
-  if (event.type === 'join') {
-    return;
-  }
+  if (event.type === 'join') return;
   if (event.type !== 'message') return;
   // if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
@@ -147,7 +240,12 @@ async function handleEvent(event, destination) {
   } else {
     return;
   }
+
+  const userId = event.source.userId;
   const courseData = await getCourseData(spreadsheetId);
+
+  // 取得對話歷史
+  const history = await getConversationHistory(spreadsheetId, userId);
 
   const SYSTEM_PROMPT = `
 你是一位小編，負責回覆客人的課程相關問題。
@@ -169,8 +267,8 @@ ${courseData}
 並且在回覆結尾加上：【需要人工處理】
 `;
 
-  let messageContent;
   let userMessage = '';
+  let messageContent;
 
   if (event.message.type === 'text') {
     userMessage = event.message.text;
@@ -180,7 +278,7 @@ ${courseData}
       `https://api-data.line.me/v2/bot/message/${event.message.id}/content`,
       {
         headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
-        responseType: 'arraybuffer'
+        responseType: 'arraybuffer',
       }
     );
     const imageData = Buffer.from(imgResponse.data).toString('base64');
@@ -188,24 +286,40 @@ ${courseData}
     messageContent = [
       {
         type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
+        source: { type: 'base64', media_type: 'image/jpeg', data: imageData },
       },
       {
         type: 'text',
-        text: '請分析這張圖片，並根據我們的課程給予相關建議。'
-      }
+        text: '請分析這張圖片，並根據我們的課程給予相關建議。',
+      },
     ];
   }
+
+  // 組合歷史訊息 + 這次的訊息
+  const messages = [
+    ...history.map(h => ({
+      role: h.role,
+      content: h.content,
+    })),
+    {
+      role: 'user',
+      content: messageContent,
+    },
+  ];
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-5',
     max_tokens: 1000,
     system: SYSTEM_PROMPT,
-    messages: [{ role: 'user', content: messageContent }],
+    messages,
   });
 
   const replyText = response.content[0].text;
   const cleanReply = replyText.replace('【需要人工處理】', '').trim();
+
+  // 寫入對話記錄
+  await appendConversation(spreadsheetId, userId, 'user', userMessage);
+  await appendConversation(spreadsheetId, userId, 'assistant', cleanReply);
 
   await notifyGroup(userMessage, cleanReply, destination);
 }
