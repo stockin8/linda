@@ -12,8 +12,14 @@ const lineConfig = {
   channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
 
+// @xtm5969p：收客人訊息用
 const client = new line.messagingApi.MessagingApiClient({
   channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
+});
+
+// @199lqszw：推訊息到群組用
+const groupClient = new line.messagingApi.MessagingApiClient({
+  channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN_199,
 });
 
 const anthropic = new Anthropic({
@@ -22,27 +28,24 @@ const anthropic = new Anthropic({
 
 const SPREADSHEET_ID_888 = process.env.SPREADSHEET_ID_888;
 const DESTINATION_888 = process.env.DESTINATION_888;
-
-async function getGoogleAuth() {
-  const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
-  return new google.auth.GoogleAuth({
-    credentials,
-    scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-  });
-}
+const GROUP_ID_888 = process.env.GROUP_ID_888;
 
 async function getCourseData(spreadsheetId) {
   try {
-    const auth = await getGoogleAuth();
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
     const sheets = google.sheets({ version: 'v4', auth });
 
     const courseRes = await sheets.spreadsheets.values.get({
-      spreadsheetId,
+      spreadsheetId: spreadsheetId,
       range: '課程!A1:L20',
     });
 
     const faqRes = await sheets.spreadsheets.values.get({
-      spreadsheetId,
+      spreadsheetId: spreadsheetId,
       range: 'FAQ!A1:B50',
     });
 
@@ -56,7 +59,9 @@ async function getCourseData(spreadsheetId) {
         const row = courseRows[i];
         if (!row[0]) continue;
         headers.forEach((header, index) => {
-          if (row[index]) courseText += `${header}：${row[index]}\n`;
+          if (row[index]) {
+            courseText += `${header}：${row[index]}\n`;
+          }
         });
         courseText += '\n';
       }
@@ -78,28 +83,24 @@ async function getCourseData(spreadsheetId) {
   }
 }
 
-// ✅ 新：寫入「待發送」工作表，取代原本的 notifyGroup()
-async function writeToSheet(customerMessage, lindaReply, spreadsheetId) {
-  try {
-    const auth = await getGoogleAuth();
-    const sheets = google.sheets({ version: 'v4', auth });
+async function notifyGroup(customerMessage, lindaReply, destination) {
+  let groupId;
 
-    const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
-
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: '待發送!A:D',
-      valueInputOption: 'RAW',
-      insertDataOption: 'INSERT_ROWS',
-      requestBody: {
-        values: [[now, customerMessage, lindaReply, 'pending']],
-      },
-    });
-
-    console.log('已寫入試算表');
-  } catch (error) {
-    console.error('寫入試算表失敗:', error);
+  if (destination === DESTINATION_888) {
+    groupId = GROUP_ID_888;
+  } else {
+    console.log('未知的 destination:', destination);
+    return;
   }
+
+  // ✅ 用 @199lqszw 的 groupClient 推訊息，不是 @xtm5969p
+  await groupClient.pushMessage({
+    to: groupId,
+    messages: [{
+      type: 'text',
+      text: `📩 客人說：「${customerMessage}」\n\n💬 Linda 建議回覆：\n${lindaReply}`
+    }]
+  });
 }
 
 app.get('/ping', (req, res) => {
@@ -116,8 +117,9 @@ app.post('/webhook', line.middleware(lineConfig), async (req, res) => {
 
 async function handleEvent(event, destination) {
   console.log('來源類型:', event.source.type, '| Group ID:', event.source.groupId || '無');
-
-  if (event.type === 'join') return;
+  if (event.type === 'join') {
+    return;
+  }
   if (event.type !== 'message') return;
   // if (event.source.type === 'group' || event.source.type === 'room') return;
   if (event.message.type !== 'text' && event.message.type !== 'image') return;
@@ -128,7 +130,6 @@ async function handleEvent(event, destination) {
   } else {
     return;
   }
-
   const courseData = await getCourseData(spreadsheetId);
 
   const SYSTEM_PROMPT = `
@@ -162,7 +163,7 @@ ${courseData}
       `https://api-data.line.me/v2/bot/message/${event.message.id}/content`,
       {
         headers: { Authorization: `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}` },
-        responseType: 'arraybuffer',
+        responseType: 'arraybuffer'
       }
     );
     const imageData = Buffer.from(imgResponse.data).toString('base64');
@@ -170,12 +171,12 @@ ${courseData}
     messageContent = [
       {
         type: 'image',
-        source: { type: 'base64', media_type: 'image/jpeg', data: imageData },
+        source: { type: 'base64', media_type: 'image/jpeg', data: imageData }
       },
       {
         type: 'text',
-        text: '請分析這張圖片，並根據我們的課程給予相關建議。',
-      },
+        text: '請分析這張圖片，並根據我們的課程給予相關建議。'
+      }
     ];
   }
 
@@ -189,8 +190,7 @@ ${courseData}
   const replyText = response.content[0].text;
   const cleanReply = replyText.replace('【需要人工處理】', '').trim();
 
-  // ✅ 寫入試算表，由 GAS + @199lqszw 負責發到群組
-  await writeToSheet(userMessage, cleanReply, spreadsheetId);
+  await notifyGroup(userMessage, cleanReply, destination);
 }
 
 const PORT = process.env.PORT || 3000;
