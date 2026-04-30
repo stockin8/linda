@@ -93,14 +93,19 @@ async function notifyGroup(customerMessage, lindaReply, destination) {
     return;
   }
 
-  // ✅ 用 @199lqszw 的 groupClient 推訊息，不是 @xtm5969p
-  await groupClient.pushMessage({
-    to: groupId,
-    messages: [{
-      type: 'text',
-      text: `📩 客人說：「${customerMessage}」\n\n💬 Linda 建議回覆：\n${lindaReply}`
-    }]
-  });
+  try {
+    await groupClient.pushMessage({
+      to: groupId,
+      messages: [{
+        type: 'text',
+        text: `📩 客人說：「${customerMessage}」\n\n💬 Linda 建議回覆：\n${lindaReply}`
+      }]
+    });
+  } catch (err) {
+    console.error('推訊息失敗，完整錯誤：', JSON.stringify(err, null, 2));
+    console.error('錯誤訊息：', err.message);
+    if (err.body) console.error('LINE 回傳內容：', err.body);
+  }
 }
 
 app.get('/ping', (req, res) => {
