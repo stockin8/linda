@@ -436,6 +436,7 @@ app.get('/ping', (req, res) => {
 });
 
 app.post('/webhook199', express.json(), async (req, res) => {
+  console.log('@863zcrkb 收到：', JSON.stringify(req.body));
   res.json({ status: 'ok' });
 });
 
