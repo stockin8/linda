@@ -426,7 +426,8 @@ app.get('/test-push', async (req, res) => {
     });
     res.send('成功');
   } catch (err) {
-    res.send('失敗：' + err.message);
+    const body = err.body ? JSON.parse(err.body) : {};
+    res.send('失敗：' + JSON.stringify(body));
   }
 });
 
