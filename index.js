@@ -84,7 +84,7 @@ async function getCourseData(spreadsheetId) {
 
     const courseRes = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: '\u8ab2\u7a0b!A1:L20',
+      range: '\u8ab2\u7a0b!A1:N20',
     });
 
     const faqRes = await sheets.spreadsheets.values.get({
@@ -377,6 +377,16 @@ async function processMessage(userId, displayName, userMessage, messageContent, 
 - 不能假裝已經處理了訂單或查詢了系統，Linda沒有查詢訂單的能力
 - 不能主動給優惠碼，除非資料庫裡有明確的優惠碼資訊
 
+【付款截圖處理】
+- 客人傳付款成功的截圖（付款完成頁、訂單查詢顯示已收到款項、會員訂單列表顯示已收到款項）→ 根據圖片裡的課程名稱，找對應的社團網址，照以下格式回覆，不多加任何文字：
+  請申請加入社團 回答入社問題
+  [課程名稱] 社團教室：
+  [社團網址]
+  並在回覆結尾加上【需要人工處理：客人已付款，請審核社團申請】
+- 客人傳付款失敗截圖 → 回覆「看到您的付款截圖，目前付款似乎未成功，可以重新嘗試或換其他付款方式，如有問題讓我幫您確認」+【需要人工處理：客人付款失敗】
+- 客人傳訂單成立但未付款截圖 → 回覆「您的訂單已建立，請完成付款後再回傳截圖給我們」不推人工處理
+- 課程資料庫的備註欄如有特別注意事項，Linda 必須參考
+
 【處理無法回答的問題】
 - 不向客人解釋原因，用自然語氣帶過，例如「好的，我幫您處理一下」
 - 在回覆結尾加上：【需要人工處理：原因說明】
@@ -418,13 +428,11 @@ ${courseData}`;
   await notifyGroup(displayName, userMessage, replyText, destination);
 }
 
-
 app.get('/ping', (req, res) => {
   res.send('OK');
 });
 
-app.post('/webhook199', express.json(), async (req, res) => {
-  console.log('@863zcrkb 收到：', JSON.stringify(req.body));
+app.post('/webhook199', line.middleware(lineConfig199), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
