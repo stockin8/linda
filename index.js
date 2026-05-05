@@ -418,6 +418,18 @@ ${courseData}`;
   await notifyGroup(displayName, userMessage, replyText, destination);
 }
 
+app.get('/test-push', async (req, res) => {
+  try {
+    await groupClient.pushMessage({
+      to: process.env.GROUP_ID_888,
+      messages: [{ type: 'text', text: '測試推訊息' }]
+    });
+    res.send('成功');
+  } catch (err) {
+    res.send('失敗：' + err.message);
+  }
+});
+
 app.get('/ping', (req, res) => {
   res.send('OK');
 });
