@@ -422,7 +422,7 @@ app.get('/ping', (req, res) => {
   res.send('OK');
 });
 
-app.post('/webhook199', line.middleware(lineConfig199), async (req, res) => {
+app.post('/webhook199', express.json(), async (req, res) => {
   res.json({ status: 'ok' });
 });
 
