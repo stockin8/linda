@@ -53,10 +53,7 @@ const WEEKEND_NOTIFY_MS = 5 * 60 * 1000;
 
 // 判斷現在是否在運作時間（每天 00:00–08:00 台北時間）
 function isOperatingHours() {
-  const now = new Date();
-  const taipei = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
-  const hour = taipei.getHours();
-  return hour >= 0 && hour < 8;
+  return true; // 測試模式：全天運作，測試完改回 hour >= 0 && hour < 8
 }
 
 // 判斷今天是否為週末（台北時間）
