@@ -51,6 +51,17 @@ let lindaEnabled = true;
 const pendingCourseNotify = {};
 const COURSE_NOTIFY_MS = 5 * 60 * 1000;
 
+// userId 對應簡短代號（001、002、003...），方便看 log
+const userCodes = {};
+let userCodeCounter = 0;
+function getUserCode(userId) {
+  if (!userCodes[userId]) {
+    userCodeCounter++;
+    userCodes[userId] = String(userCodeCounter).padStart(3, '0');
+  }
+  return userCodes[userId];
+}
+
 // 判斷現在是否在運作時間（每天 00:00–08:00 台北時間）
 function isOperatingHours() {
   const now = new Date();
@@ -310,7 +321,7 @@ async function handleImageTimeout(userId) {
   delete pendingImages[userId];
 
   // 純圖片（沒有跟文字）一律忽略，不推群組
-  console.log(`[忽略] 客人傳純圖片，無文字，不處理 userId:${userId}`);
+  console.log(`[${getUserCode(userId)}] 客人傳純圖片，無文字，不處理`);
 }
 
 async function handleTextTimeout(userId) {
@@ -493,19 +504,24 @@ ${courseData}`;
     }
   } else {
     // 非運作時間：不回客人，啟動 5 分鐘計時器，沒下一句就推群組「有客人問課程」
+    const code = getUserCode(userId);
+    const restarting = !!pendingCourseNotify[userId];
     if (pendingCourseNotify[userId]) {
       clearTimeout(pendingCourseNotify[userId].timer);
     }
     const timer = setTimeout(async () => {
       delete pendingCourseNotify[userId];
+      console.log(`[${code}] 5分鐘到，推通知到群組「有客人問課程」`);
       await notifyGroupSpecial(displayName, userMessage, '有客人詢問課程，等待超過5分鐘無人回應', destination);
     }, COURSE_NOTIFY_MS);
     pendingCourseNotify[userId] = { timer };
-    console.log(`[非運作時間] 客人問課程，啟動5分鐘計時器 userId:${userId}`);
+    console.log(`[${code}] 客人問課程，${restarting ? '重新' : ''}啟動5分鐘計時器`);
   }
 }
 
 app.get('/ping', (req, res) => {
+  const now = new Date().toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' });
+  console.log(`[戳醒] 痛！被戳了一下 ${now}`);
   res.send('OK');
 });
 
@@ -563,19 +579,22 @@ async function handleEvent(event, destination) {
 
   // Linda 手動關閉 → 完全不處理
   if (!lindaEnabled) {
-    console.log(`[已關閉] Linda 手動關閉中，不處理 userId:${userId}`);
+    console.log(`[${getUserCode(userId)}] Linda 手動關閉中，不處理`);
     return;
   }
+
+  const code = getUserCode(userId);
 
   // 客人傳新訊息時，清除前一個「無人回應」計時器
   if (pendingCourseNotify[userId]) {
     clearTimeout(pendingCourseNotify[userId].timer);
     delete pendingCourseNotify[userId];
+    console.log(`[${code}] 計時中斷（客人傳了新訊息）`);
   }
 
   // 非運作時間記錄一筆 log（流程繼續，由 processMessage 判斷是否為課程問題）
   if (!isOperatingHours()) {
-    console.log(`[非運作時間] 收到客人訊息，交給 Claude 判斷是否為課程問題 userId:${userId}`);
+    console.log(`[${code}] 收到客人訊息，判斷是否為課程問題`);
   }
 
   if (!checkRateLimit(userId)) {
@@ -624,7 +643,7 @@ async function handleEvent(event, destination) {
     // 預先過濾：明確無關的道謝/接續詞直接忽略，不呼叫 Claude（省 API）
     const IGNORE_WORDS = ['謝謝', '感謝', '謝謝你', '謝謝您', '感恩', '收到', 'ok', 'OK', 'Ok', '好', '好的', '了解', '好喔', '謝謝妳'];
     if (IGNORE_WORDS.includes(userMessage.trim())) {
-      console.log(`[預先過濾] 忽略道謝/接續詞「${userMessage.trim()}」，不呼叫 Claude userId:${userId}`);
+      console.log(`[${getUserCode(userId)}] 忽略道謝/接續詞「${userMessage.trim()}」，不呼叫 Claude`);
       return;
     }
 
