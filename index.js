@@ -47,13 +47,16 @@ const pendingTexts = {};
 // Linda 開關狀態（預設開啟）
 let lindaEnabled = true;
 
-// 週末補漏：記錄非運作時間收到訊息的客人，5分鐘內沒有下一則則推通知
-const pendingWeekendNotify = {};
-const WEEKEND_NOTIFY_MS = 5 * 60 * 1000;
+// 非運作時間：客人問課程超過5分鐘無回應則推通知到群組
+const pendingCourseNotify = {};
+const COURSE_NOTIFY_MS = 5 * 60 * 1000;
 
 // 判斷現在是否在運作時間（每天 00:00–08:00 台北時間）
 function isOperatingHours() {
-  return true; // 測試模式：全天運作，測試完改回 hour >= 0 && hour < 8
+  const now = new Date();
+  const taipei = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+  const hour = taipei.getHours();
+  return hour >= 0 && hour < 8;
 }
 
 // 判斷今天是否為週末（台北時間）
@@ -306,34 +309,8 @@ async function handleImageTimeout(userId) {
   if (!pending) return;
   delete pendingImages[userId];
 
-  const { imageData, displayName, spreadsheetId, destination } = pending;
-
-  try {
-    const response = await anthropic.messages.create({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 200,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/jpeg', data: imageData },
-          },
-          {
-            type: 'text',
-            text: '\u8acb\u7528\u4e00\u53e5\u8a71\u7c21\u77ed\u63cf\u8ff0\u9019\u5f35\u5716\u7247\u7684\u5167\u5bb9\u662f\u4ec0\u9ebc\uff08\u4f8b\u5982\uff1a\u7591\u4f3c\u70ba\u8a02\u55ae\u622a\u5716\u3001\u8ab2\u7a0b\u8868\u3001\u500b\u4eba\u7167\u7247\u7b49\uff09\uff0c\u4e0d\u9700\u8981\u8a73\u7d30\u5206\u6790\u3002',
-          },
-        ],
-      }],
-    });
-
-    const imageDescription = response.content[0].text.trim();
-    await notifyGroupImageOnly(displayName, imageDescription, destination);
-    await appendConversation(spreadsheetId, userId, 'user', '\uff08\u5ba2\u4eba\u50b3\u4e86\u4e00\u5f35\u5716\u7247\uff09');
-  } catch (err) {
-    console.error('\u5716\u7247\u63cf\u8ff0\u5931\u6557:', err.message);
-    await notifyGroupImageOnly(displayName, '\u7121\u6cd5\u5224\u65b7\u5716\u7247\u5167\u5bb9', destination);
-  }
+  // 純圖片（沒有跟文字）一律忽略，不推群組
+  console.log(`[忽略] 客人傳純圖片，無文字，不處理 userId:${userId}`);
 }
 
 async function handleTextTimeout(userId) {
@@ -378,22 +355,23 @@ async function processMessage(userId, displayName, userMessage, messageContent, 
 - 不在結尾加「請問還有其他問題嗎？」
 - 客人道謝、閒聊、感嘆、抱怨、說「對了」「還有」「另外」「收到」→ 完全不回，回傳空白
 
-【最重要的範圍限制 — 非課程/方格子問題一律不回】
-你只處理以下兩類問題：
-1. 客人想了解或購買課程
-2. 客人想了解或訂閱方格子
+【最重要的範圍限制 — 你只處理課程與方格子】
+你只回應以下兩類訊息：
+1. 客人想了解或購買「課程」
+2. 客人想了解或訂閱「方格子」
 
-以下所有情況，完全不回覆客人，直接回傳【需要人工處理：具體原因】：
-- 技術問題（軟體顯示異常、App 問題、帳號問題）
-- 社團問題（找不到社團、社團加入）
-- 訂單、付款、退費相關
-- 優分析、888機器人、888產業分析模組
+以下所有情況，一律只回傳標記【非課程】，不回任何其他文字：
+- 技術問題（軟體顯示異常、App 問題、帳號問題、挖土機問題）
+- 社團問題、訂單、付款、退費、優分析、888機器人、888產業分析模組
 - 講師介紹、教學風格比較
-- 任何與課程報名無直接關係的問題
-- 客人表達情緒（「太麻煩了」「別嚇我」「好煩」）→ 回傳空白，不回應
+- 圖片內容與課程無關（手寫筆記、供應鏈圖、截圖等）
+- 客人道謝、閒聊、感嘆、抱怨、表達情緒
+- 客人說「對了」「還有」「另外」「收到」等接續語
+- 任何與課程報名無直接關係的訊息
 
-判斷原則：這則訊息是否能讓我給出課程連結？
-→ 不能 → 回傳空白或【需要人工處理】，不說任何其他話
+判斷原則：這則訊息是否在問課程或方格子？
+→ 不是 → 只回傳【非課程】四個字，不說任何其他話
+→ 是 → 正常依照下方流程回覆
 
 【課程推薦流程 — 依序判斷】
 
@@ -478,43 +456,52 @@ ${courseData}`;
 
   const replyText = response.content[0].text.trim();
 
-  if (replyText.includes('\u3010\u60f3\u804a\u5929\u3011')) {
-    await notifyGroupSpecial(displayName, userMessage, '\u6b64\u5ba2\u4eba\u4f3c\u4e4e\u60f3\u9592\u804a\uff0c\u975e\u8ab2\u7a0b\u76f8\u95dc\u554f\u984c', destination);
+  // 非課程問題 → 完全忽略，不回客人也不推群組
+  if (replyText.includes('【非課程】')) {
+    return;
+  }
+
+  if (replyText.includes('【惡意訊息】')) {
+    await notifyGroupSpecial(displayName, userMessage, '此客人傳送了騷擾或惡意訊息', destination);
     await appendConversation(spreadsheetId, userId, 'user', userMessage);
     return;
   }
 
-  if (replyText.includes('\u3010\u60e1\u610f\u8a0a\u606f\u3011')) {
-    await notifyGroupSpecial(displayName, userMessage, '\u6b64\u5ba2\u4eba\u50b3\u9001\u4e86\u9a37\u64fe\u6216\u60e1\u610f\u8a0a\u606f', destination);
-    await appendConversation(spreadsheetId, userId, 'user', userMessage);
-    return;
-  }
-
-  await appendConversation(spreadsheetId, userId, 'user', userMessage);
-
+  // 沒有實際內容就忽略
   if (!replyText) return;
 
+  await appendConversation(spreadsheetId, userId, 'user', userMessage);
   await appendConversation(spreadsheetId, userId, 'assistant', replyText);
 
-  // 移除【需要人工處理：...】標記後才回給客人
+  // 移除【需要人工處理：...】標記
   const cleanReply = replyText.replace(/【需要人工處理：.+?】/, '').trim();
+  if (!cleanReply) return;
 
-  // 直接回覆客人
-  if (cleanReply && replyToken) {
-    try {
-      await client.replyMessage({
-        replyToken,
-        messages: [{ type: 'text', text: cleanReply }],
-      });
-    } catch (err) {
-      console.error('回覆客人失敗:', err.message);
+  const operating = isOperatingHours();
+
+  if (operating) {
+    // 運作時間內：直接回覆客人
+    if (replyToken) {
+      try {
+        await client.replyMessage({
+          replyToken,
+          messages: [{ type: 'text', text: cleanReply }],
+        });
+      } catch (err) {
+        console.error('回覆客人失敗:', err.message);
+      }
     }
-  }
-
-  // 有【需要人工處理】才推到群組
-  const humanMatch = replyText.match(/【需要人工處理：(.+?)】/);
-  if (humanMatch) {
-    await notifyGroup(displayName, userMessage, replyText, destination);
+  } else {
+    // 非運作時間：不回客人，啟動 5 分鐘計時器，沒下一句就推群組「有客人問課程」
+    if (pendingCourseNotify[userId]) {
+      clearTimeout(pendingCourseNotify[userId].timer);
+    }
+    const timer = setTimeout(async () => {
+      delete pendingCourseNotify[userId];
+      await notifyGroupSpecial(displayName, userMessage, '有客人詢問課程，等待超過5分鐘無人回應', destination);
+    }, COURSE_NOTIFY_MS);
+    pendingCourseNotify[userId] = { timer };
+    console.log(`[非運作時間] 客人問課程，啟動5分鐘計時器 userId:${userId}`);
   }
 }
 
@@ -574,30 +561,21 @@ async function handleEvent(event, destination) {
 
   const userId = event.source.userId;
 
-  // Linda 開關 & 運作時間判斷
-  const operating = isOperatingHours();
-  if (!lindaEnabled || !operating) {
-    // 週末非運作時間：5分鐘內沒有下一則訊息則推通知到群組
-    if (isWeekend() && !operating && event.message.type === 'text') {
-      const userMessage = event.message.text;
-
-      if (pendingWeekendNotify[userId]) {
-        clearTimeout(pendingWeekendNotify[userId].timer);
-      }
-
-      const timer = setTimeout(async () => {
-        delete pendingWeekendNotify[userId];
-        let displayName = '未知客人';
-        try {
-          const profile = await client.getProfile(userId);
-          displayName = profile.displayName;
-        } catch (err) {}
-        await notifyGroupSpecial(displayName, userMessage, '週末非服務時間，客人等待超過5分鐘無人接應', destination);
-      }, WEEKEND_NOTIFY_MS);
-
-      pendingWeekendNotify[userId] = { timer, userMessage };
-    }
+  // Linda 手動關閉 → 完全不處理
+  if (!lindaEnabled) {
+    console.log(`[已關閉] Linda 手動關閉中，不處理 userId:${userId}`);
     return;
+  }
+
+  // 客人傳新訊息時，清除前一個「無人回應」計時器
+  if (pendingCourseNotify[userId]) {
+    clearTimeout(pendingCourseNotify[userId].timer);
+    delete pendingCourseNotify[userId];
+  }
+
+  // 非運作時間記錄一筆 log（流程繼續，由 processMessage 判斷是否為課程問題）
+  if (!isOperatingHours()) {
+    console.log(`[非運作時間] 收到客人訊息，交給 Claude 判斷是否為課程問題 userId:${userId}`);
   }
 
   if (!checkRateLimit(userId)) {
@@ -642,6 +620,13 @@ async function handleEvent(event, destination) {
 
   if (event.message.type === 'text') {
     const userMessage = event.message.text;
+
+    // 預先過濾：明確無關的道謝/接續詞直接忽略，不呼叫 Claude（省 API）
+    const IGNORE_WORDS = ['謝謝', '感謝', '謝謝你', '謝謝您', '感恩', '收到', 'ok', 'OK', 'Ok', '好', '好的', '了解', '好喔', '謝謝妳'];
+    if (IGNORE_WORDS.includes(userMessage.trim())) {
+      console.log(`[預先過濾] 忽略道謝/接續詞「${userMessage.trim()}」，不呼叫 Claude userId:${userId}`);
+      return;
+    }
 
     // 如果有待處理的圖片，取消圖片 timer，合併圖片和文字一起處理
     if (pendingImages[userId]) {
